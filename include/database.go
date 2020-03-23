@@ -5,40 +5,35 @@ import (
 	"fmt"
 
 	"../config"
-
-	"github.com/jackc/pgx"
+	"github.com/jackc/pgx/pgxpool"
 )
 
-// Database handler
-type Database struct {
-	*pgx.Conn
-}
-
 // DB database handler
-var DB *pgx.Conn
+var DB *pgxpool.Pool
 var err error
 
 // InitDB opens a database and saves the reference to `Database` struct.
-func InitDB() *pgx.Conn {
+func InitDB() *pgxpool.Pool {
 	var db = DB
 
-	config := config.InitConfig()
+	configuration := config.InitConfig()
 
-	database := config.Database.Dbname
-	username := config.Database.Username
-	password := config.Database.Password
-	host := config.Database.Host
-	port := config.Database.Port
+	database := configuration.Database.Dbname
+	username := configuration.Database.Username
+	password := configuration.Database.Password
+	host := configuration.Database.Host
+	port := configuration.Database.Port
 
-	db, err = pgx.Connect(context.Background(), "host="+host+" port="+port+" user="+username+" dbname="+database+" sslmode=disable password="+password)
+	db, err = pgxpool.Connect(context.Background(), "host="+host+" port="+port+" user="+username+" dbname="+database+" sslmode=disable password="+password)
 	if err != nil {
 		fmt.Println("db err: ", err)
 	}
+
 	DB = db
 	return DB
 }
 
 // GetDB helps you to get a connection
-func GetDB() *pgx.Conn {
+func GetDB() *pgxpool.Pool {
 	return DB
 }

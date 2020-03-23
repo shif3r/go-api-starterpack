@@ -1,62 +1,84 @@
 package main
 
 import (
-	"context"
+	"net/http"
+	"time"
 
 	"./config"
 	"./controller"
 	"./include"
-
+	"./middleware"
 	"github.com/gin-contrib/cors"
-	"github.com/gin-contrib/sessions"
-	"github.com/gin-contrib/sessions/memstore"
 	"github.com/gin-gonic/gin"
 	"github.com/jackc/pgx"
+	"github.com/jackc/pgx/pgxpool"
 )
 
-var db *pgx.Conn
-var err error
-
-func main() {
-	config := config.InitConfig()
-
-	db = include.InitDB()
-	defer db.Close(context.Background())
-
+func setupRouter() (*gin.Engine, config.Configuration, *pgxpool.Pool) {
+	initConfig := config.InitConfig()
+	db := include.InitDB()
 	router := gin.Default()
-	router.Use(cors.Default())
-
-	store := memstore.NewStore([]byte("secret"))
-	router.Use(sessions.Sessions("mysession", store))
-	// Non-protected routes
+	//router.Use(cors.Default())
+	router.Use(cors.New(cors.Config{
+		AllowMethods:     []string{"GET", "POST"},
+		AllowHeaders:     []string{"Origin", "Content-Length", "Content-Type", "XX-User-Agent", "Access-token"},
+		AllowCredentials: false,
+		MaxAge:           12 * time.Hour,
+		AllowAllOrigins:  true,
+	}))
+	router.POST("/signup", controller.Register)
+	router.POST("/signin", controller.Signin)
+	router.POST("/refresh", controller.Refresh)
+	router.POST("/signout", controller.SignOut)
+	router.GET("/getSint", func(c *gin.Context) {
+		rows, err := db.Query(c.Request.Context(), "SELECT * FROM public.\"Sessions\"")
+		defer rows.Close()
+		if err != nil {
+			c.JSON(400, gin.H{"Err": err.Error})
+			return
+		}
+		i := 0
+		for rows.Next() {
+			i++
+		}
+		if rows.Err() != nil {
+			c.JSON(400, gin.H{"Err": err.Error})
+			return
+		}
+		c.JSON(200, gin.H{"Sessions": i})
+	})
+	router.GET("/delS", func(c *gin.Context) {
+		rows, err := db.Exec(c.Request.Context(), "DELETE FROM public.\"Sessions\"")
+		if err != nil {
+			if err == pgx.ErrNoRows {
+				return
+			}
+			c.JSON(400, gin.H{"Err": err.Error()})
+			return
+		}
+		c.JSON(200, gin.H{"Deleted": rows.RowsAffected()})
+	})
 	api := router.Group("/api")
 	{
-		checkPassword := api.Group("/checkPassword")
-		{
-			checkPassword.POST("/signup", controller.Register)
-			checkPassword.POST("/signin", controller.Signin)
-		}
-	}
-
-	router.GET("/incr", func(c *gin.Context) {
-		session := sessions.Default(c)
-		session.Options(sessions.Options{
-			Path:     "/",
-			MaxAge:   5400, //секунды (полтора часа)
-			HttpOnly: true,
+		api.Use(middleware.JwtAuthentication())
+		api.GET("/hello", func(c *gin.Context) {
+			c.JSON(200, gin.H{"Msg": "hello"})
 		})
-		var count int
-		v := session.Get("count")
-		if v == nil {
-			count = 0
-		} else {
-			count = v.(int)
-			count++
-		}
-		session.Set("count", count)
-		session.Save()
-		c.JSON(200, gin.H{"count": count})
-	})
+		api.GET("/getinfo", controller.GetAccountInfo)
+		api.POST("/delSessions", controller.DeleteUserSessions)
+	}
+	return router, initConfig, db
+}
 
-	router.Run(":" + config.Server.Port)
+func main() {
+	router, initConfig, db := setupRouter()
+	defer db.Close()
+	s := &http.Server{
+		Addr:           ":" + initConfig.Server.Port,
+		Handler:        router,
+		ReadTimeout:    10 * time.Second,
+		WriteTimeout:   10 * time.Second,
+		MaxHeaderBytes: 1 << 20,
+	}
+	s.ListenAndServe()
 }

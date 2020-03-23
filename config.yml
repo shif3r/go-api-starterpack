@@ -4,6 +4,9 @@ database:
   password: ""
   host: ""
   port: ""
-
 server:
-  port: ""
+  port: "3000"
+jwt:
+  jwtkey: ""
+  accessexpiresin: "1h1m1s"
+  refreshexpiresin: "1h1m1s"
